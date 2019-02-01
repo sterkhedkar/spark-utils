@@ -1,0 +1,105 @@
+rename_col <- function(dataframe, from="", to="") {
+  colnames(dataframe)[which(names(dataframe)==from)]=to
+  return(dataframe)
+}
+
+clean_gaids <- function (dataframe) {
+  dataframe = subset(dataframe, dataframe$gaid != "00000000-0000-0000-0000-000000000000")
+  dataframe = subset(dataframe, dataframe$gaid != "")
+  dataframe = subset(dataframe, dataframe$gaid != " ")
+  dataframe = dataframe[isNotNull(dataframe$gaid)]
+  return(dataframe)
+}
+
+remove_column <- function(dataframe, column="") {
+  return(dataframe[,-which(colnames(dataframe)==column)])
+}
+
+clean_up_after_merge <- function(dataframe, merged_on_col) {
+  dataframe = rename_col(dataframe = dataframe, from = paste(merged_on_col, "_x", sep = ""), to = merged_on_col)
+  dataframe = remove_column(dataframe = dataframe, column = paste(merged_on_col, "_y", sep = ""))
+  return(dataframe)
+}
+
+cache_to_hive_table <- function(dataframe, table_name) {
+  sql_tbl = create_SQL_Table(dataframe = dataframe, table_name = table_name)
+  sql_tbl = read_sql_table(table_name = table_name)
+  return(sql_tbl)
+}
+
+remove_mutiple_columns <- function(dataframe, list_of_columns) {
+  for(column in list_of_columns) {
+    dataframe = remove_column(dataframe, column)
+  }
+  return(dataframe)
+}
+
+create_SQL_Table <- function(dataframe, table_name) {
+  view = createOrReplaceTempView(dataframe, "temp_view")
+  table = sql(paste("CREATE TABLE ", table_name, " AS SELECT * FROM temp_view"))
+  return(table)
+}
+
+write_to_csv <- function(dataframe, path, coalesce_to=1) {
+  coalesced=coalesce(x=dataframe,coalesce_to)
+  print("Coalesced the Dataframe...")
+  print("Writing CSV")
+  csv = write.df(coalesced,path=path, source="com.databricks.spark.csv",header=T)
+  return(csv)
+}
+
+merge_and_clean <- function(x, y, by, all_x=FALSE, all_y=FALSE) {
+  # Check all merge conditions 
+  if(all_x & all_y) {
+    merged_dataframe = merge(x, y, by=by, all.x=all_x, all.y=all_y)  
+  } else if(!all_x & !all_y) {
+    merge_dataframe = merge(x, y, by=by)
+  } else if (all_y) {
+    merge_dataframe = merge(x, y, by=by, all.y=all_y)
+  } else if(all_x) {
+    merge_dataframe = merge(x, y, by=by, all.x=all_x)
+  }
+  # Clean after merge
+  merge_dataframe = clean_up_after_merge(dataframe=merge_dataframe, merged_on_col=by)
+  return(merge_dataframe)
+}
+
+create_crosstable_for_scrub <- function(data, bucket_size_in_seconds) {
+  data$start_bucket = ceil(data$playhead_start_position/bucket_size_in_seconds)
+  data$stop_bucket = ceil(data$playhead_stop_position/bucket_size_in_seconds)
+  data$val = 1
+  scrub_pivot = sum(pivot(groupBy(data, "start_bucket"),"stop_bucket"), "val")
+  return(scrub_pivot)
+}
+
+read_sql_table <- function(table_name) {
+  return(sql(paste("select * from ", table_name)))
+}
+
+preview_from_table <- function(table_name, entries=1000) {
+  View(head(sql(paste("select * from "),table_name), entries))
+}
+
+read_parquet <- function(columns_to_read, path, date_pattern) {
+  data = read.parquet(paste(path, date_pattern))[, columns_to_read]
+  return(data)
+}
+
+show_data_for_gaid <- function(dataframe, req_gaid, num_rows=1000) {
+  data_for_gaid = subset(dataframe, dataframe$gaid == req_gaid)
+  View(head(data_for_gaid, num_rows))
+  return(data_for_gaid)
+}
+
+show_random_sample <- function(dataframe, sample_size) {
+  temp = createOrReplaceTempView(dataframe, "temp_view")
+  random_sample = sql("SELECT * FROM temp_view ORDER BY RAND()")
+  View(head(random_sample, 1000))
+  return(random_sample)
+}
+
+clean_date = function(date){
+  date = gsub(date, pattern = "[[:punct:]]",replacement = "_")
+  date = substr(date, 1, nchar(date)-1)
+  return(date)
+}
