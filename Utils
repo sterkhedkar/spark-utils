@@ -1,3 +1,37 @@
+###############################
+# install.packages("magrittr", quiet = T)
+# library(magrittr)
+###############################
+
+rbind_with_missing_columns = function(dataframe1, dataframe2) {
+  if(ncol(dataframe1) > ncol(dataframe2)){
+    big = colnames(dataframe1)
+    small = colnames(dataframe2)
+    for (i in 1:ncol(dataframe1)){
+      if(!(big[[i]] %in% small)) {
+        print(paste0("Adding ", big[[i]]," to the second dataframe"))
+        dataframe2 = withColumn(dataframe2, big[[i]], lit(0))
+      }
+    }
+  } else if(ncol(dataframe2)> ncol(dataframe1)) {
+    big = colnames(dataframe2)
+    small = colnames(dataframe1)
+    for (i in 1:ncol(dataframe2)){
+      if(!(big[[i]] %in% small)) {
+        print(paste0("Adding ", big[[i]]," to the first dataframe"))
+        dataframe1 = withColumn(dataframe1, big[[i]], lit(0))
+      }
+    }
+  } else{
+    new_df=rbind(dataframe1,dataframe2)
+    return(new_df)
+  }
+  dataframe1 = dataframe1[,big]
+  dataframe2 = dataframe2[,big]
+  new_df = rbind(dataframe1, dataframe2)
+  return(new_df)
+}
+
 rename_col <- function(dataframe, from="", to="") {
   colnames(dataframe)[which(names(dataframe)==from)]=to
   return(dataframe)
@@ -49,26 +83,16 @@ write_to_csv <- function(dataframe, path, coalesce_to=1) {
 }
 
 merge_and_clean <- function(x, y, by, all_x=FALSE, all_y=FALSE) {
-  # Check all merge conditions 
-  if(all_x & all_y) {
-    merged_dataframe = merge(x, y, by=by, all.x=all_x, all.y=all_y)  
-  } else if(!all_x & !all_y) {
-    merge_dataframe = merge(x, y, by=by)
-  } else if (all_y) {
-    merge_dataframe = merge(x, y, by=by, all.y=all_y)
-  } else if(all_x) {
-    merge_dataframe = merge(x, y, by=by, all.x=all_x)
-  }
-  # Clean after merge
-  merge_dataframe = clean_up_after_merge(dataframe=merge_dataframe, merged_on_col=by)
-  return(merge_dataframe)
+  merged_dataframe = merge(x, y, by=by, all.x=all_x, all.y=all_y)  
+  merged_dataframe = clean_up_after_merge(dataframe=merged_dataframe, merged_on_col=by)
+  return(merged_dataframe)
 }
 
 create_crosstable_for_scrub <- function(data, bucket_size_in_seconds) {
   data$start_bucket = ceil(data$playhead_start_position/bucket_size_in_seconds)
   data$stop_bucket = ceil(data$playhead_stop_position/bucket_size_in_seconds)
   data$val = 1
-  scrub_pivot = sum(pivot(groupBy(data, "start_bucket"),"stop_bucket"), "val")
+  scrub_pivot = sum(pivot(groupBy(data, "gaid"),"col2"), "val")
   return(scrub_pivot)
 }
 
@@ -81,7 +105,7 @@ preview_from_table <- function(table_name, entries=1000) {
 }
 
 read_parquet <- function(columns_to_read, path, date_pattern) {
-  data = read.parquet(paste(path, date_pattern))[, columns_to_read]
+  data = read.parquet(paste0(path, date_pattern))[, columns_to_read]
   return(data)
 }
 
@@ -98,8 +122,64 @@ show_random_sample <- function(dataframe, sample_size) {
   return(random_sample)
 }
 
-clean_date = function(date){
+clean_date_for_sql = function(date){
   date = gsub(date, pattern = "[[:punct:]]",replacement = "_")
   date = substr(date, 1, nchar(date)-1)
   return(date)
 }
+
+read_csv = function(file_path) {
+  data = read.df(file_path, source="com.databricks.spark.csv", header="true")
+  return(data)
+}
+
+map_with_cms = function(dataframe, cms_path) {
+  cms = read.df(cms_path, source="com.databricks.spark.csv", header="true")
+  cms = rename_col(cms, "id", "media_id")
+  mapper_merged_data = merge(dataframe, cms, by="media_id")
+  mapper_merged_data = clean_up_after_merge(mapper_merged_data, "media_id")
+  return(mapper_merged_data)
+}
+
+# to profile the clusters
+demographics_profiling = function() {
+  # age_split_vs
+  # Bucketize ages
+  # gender_split_vs
+  # Gender cleanups
+  # geo_split_vs --- geo_mapper_merge
+  # Metro - Non-Metro classification
+}
+
+age_split_vs = function(dataframe, variable_predicate) {
+  
+}
+
+gender_split_vs = function(dataframe, variable_predicate) {
+  
+}
+
+geo_split_vs = function(dataframe, variable_predicate) {
+  
+}
+
+geo_mapper_merge = function(dataframe, geo_mapper_path) {
+  mapper = read.df(geo_mapper_path, source="com.databricks.spark.csv", header="true")
+  merged_dataframe = merge(dataframe, mapper)
+  return(merged_dataframe)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
